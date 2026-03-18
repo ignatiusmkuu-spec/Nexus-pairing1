@@ -85,27 +85,35 @@ app.get('/api/pair', async (req, res) => {
 
     sock.ev.on('creds.update', saveCreds);
 
+    let succeeded = false;
+
     await new Promise((resolve) => {
       sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
 
         if (connection === 'open') {
+          succeeded = true;
           try {
-            const credsPath = path.join(tmpDir, 'creds.json');
-            const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-            const sessionString = 'NEXUS-MD:~' + Buffer.from(JSON.stringify(creds)).toString('base64');
+            // Use in-memory creds — disk write may still be in flight
+            const sessionString =
+              'NEXUS-MD:~' + Buffer.from(JSON.stringify(state.creds)).toString('base64');
             send('session', { sessionString });
           } catch {
-            send('error', { message: 'Linked but failed to read session. Try again.' });
+            send('error', { message: 'Linked but could not export session. Try again.' });
           }
           resolve();
         }
 
         if (connection === 'close') {
+          if (succeeded) { resolve(); return; }
           const code = lastDisconnect?.error?.output?.statusCode;
-          if (code !== DisconnectReason.loggedOut) {
-            send('error', { message: 'WhatsApp connection closed. Please try again.' });
-          }
+          const reason =
+            code === DisconnectReason.loggedOut
+              ? 'WhatsApp rejected the request. Wait a moment and try again.'
+              : code === DisconnectReason.forbidden
+              ? 'Pairing forbidden by WhatsApp. Try a different number or wait.'
+              : 'WhatsApp disconnected. Please try again.';
+          send('error', { message: reason });
           resolve();
         }
       });
