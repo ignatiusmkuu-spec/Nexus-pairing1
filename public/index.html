@@ -24,12 +24,18 @@
       font-family: 'Share Tech Mono', monospace;
       background: var(--bg);
       color: var(--text);
-      min-height: 100vh;
+      min-height: 100dvh;
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: center;
-      overflow: hidden;
+      overflow-y: auto;
+      overflow-x: hidden;
       position: relative;
+      padding-bottom: 1rem;
+    }
+
+    @media (min-height: 700px) {
+      body { align-items: center; }
     }
 
     /* Matrix rain canvas */
@@ -62,17 +68,28 @@
       position: relative;
       z-index: 2;
       width: 100%;
-      max-width: 420px;
-      padding: 1rem;
+      max-width: 480px;
+      padding: 0.75rem;
+    }
+
+    @media (max-width: 500px) {
+      .wrapper {
+        max-width: 100%;
+        padding: 0.5rem;
+      }
     }
 
     .card {
       background: var(--card);
       border: 1px solid var(--green-border);
       border-radius: 4px;
-      padding: 2rem 1.75rem;
+      padding: 1.75rem 1.5rem;
       position: relative;
       box-shadow: 0 0 40px rgba(0,255,136,0.04), inset 0 0 60px rgba(0,0,0,0.4);
+    }
+
+    @media (max-width: 500px) {
+      .card { padding: 1.5rem 1.1rem; }
     }
 
     /* Corner decorations */
@@ -156,7 +173,7 @@
 
     h1 {
       font-family: 'Orbitron', sans-serif;
-      font-size: 1.5rem;
+      font-size: 1.6rem;
       font-weight: 700;
       color: #fff;
       text-align: center;
@@ -164,8 +181,12 @@
       letter-spacing: 1px;
     }
 
+    @media (max-width: 500px) {
+      h1 { font-size: 1.4rem; }
+    }
+
     .subtitle {
-      font-size: 0.72rem;
+      font-size: 0.78rem;
       color: var(--text-dim);
       text-align: center;
       margin-bottom: 1.5rem;

@@ -9,7 +9,6 @@ const PORT = process.env.PORT || 5000;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Reuse same global sessions store as api/pair.js
 const sessions = global.__nexusSessions || (global.__nexusSessions = new Map());
 
 async function startPairing(phone) {
@@ -19,8 +18,9 @@ async function startPairing(phone) {
     DisconnectReason,
     makeCacheableSignalKeyStore,
     fetchLatestBaileysVersion
-  } = require('@whiskeysockets/baileys');
-  const pino = require('pino');
+  } = await import('@whiskeysockets/baileys');
+
+  const pino = (await import('pino')).default;
 
   const id = `${phone}_${Date.now()}`;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-'));
@@ -35,12 +35,14 @@ async function startPairing(phone) {
     version = [2, 3000, 1015901307];
   }
 
+  const logger = pino({ level: 'silent' });
+
   const sock = makeWASocket({
     version,
-    logger: pino({ level: 'silent' }),
+    logger,
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+      keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
     printQRInTerminal: false,
     browser: ['NEXUS-MD', 'Chrome', '3.0'],
@@ -76,9 +78,7 @@ async function startPairing(phone) {
       const code = lastDisconnect?.error?.output?.statusCode;
       if (entry.state === 'pending') {
         entry.state = 'error';
-        entry.error = code === DisconnectReason.loggedOut
-          ? 'Logged out.'
-          : 'Connection closed. Try again.';
+        entry.error = code === DisconnectReason.loggedOut ? 'Logged out.' : 'Connection closed. Try again.';
       }
     }
   });
@@ -134,7 +134,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`NEXUS-MD Pairing Server running on http://0.0.0.0:${PORT}`);
 }).on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} in use, retrying in 3s...`);
-    setTimeout(() => process.exit(1), 3000);
+    console.error(`Port ${PORT} in use, exiting.`);
+    process.exit(1);
   }
 });

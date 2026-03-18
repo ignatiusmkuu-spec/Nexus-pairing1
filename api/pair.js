@@ -2,18 +2,19 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// Global session store — persists across warm Lambda invocations
 const sessions = global.__nexusSessions || (global.__nexusSessions = new Map());
 
 async function startPairing(phone) {
+  // Dynamic import — Baileys v7 is ESM only, require() doesn't work
   const {
     makeWASocket,
     useMultiFileAuthState,
     DisconnectReason,
     makeCacheableSignalKeyStore,
     fetchLatestBaileysVersion
-  } = require('@whiskeysockets/baileys');
-  const pino = require('pino');
+  } = await import('@whiskeysockets/baileys');
+
+  const pino = (await import('pino')).default;
 
   const id = `${phone}_${Date.now()}`;
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-'));
@@ -28,12 +29,14 @@ async function startPairing(phone) {
     version = [2, 3000, 1015901307];
   }
 
+  const logger = pino({ level: 'silent' });
+
   const sock = makeWASocket({
     version,
-    logger: pino({ level: 'silent' }),
+    logger,
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+      keys: makeCacheableSignalKeyStore(state.keys, logger)
     },
     printQRInTerminal: false,
     browser: ['NEXUS-MD', 'Chrome', '3.0'],
@@ -76,7 +79,6 @@ async function startPairing(phone) {
     }
   });
 
-  // Auto-cleanup after 3 minutes
   setTimeout(() => {
     const entry = sessions.get(id);
     if (entry) {
@@ -91,46 +93,34 @@ async function startPairing(phone) {
 
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
+  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
   const action = url.searchParams.get('action') || 'start';
 
-  // POST or GET /api/pair?action=start&phone=254...
   if (action === 'start') {
     const phone = (url.searchParams.get('phone') || '').replace(/\D/g, '');
-
     if (!phone || phone.length < 7) {
       res.status(400).json({ error: 'Invalid phone number. Include country code without +.' });
       return;
     }
-
     try {
       const { id, pairingCode } = await startPairing(phone);
       res.status(200).json({ id, pairingCode });
     } catch (err) {
-      console.error('startPairing error:', err);
+      console.error('startPairing error:', err.message);
       res.status(500).json({ error: err.message || 'Failed to start pairing.' });
     }
     return;
   }
 
-  // GET /api/pair?action=status&id=...
   if (action === 'status') {
     const id = url.searchParams.get('id') || '';
     const entry = sessions.get(id);
-
-    if (!entry) {
-      res.status(200).json({ status: 'expired' });
-      return;
-    }
-
+    if (!entry) { res.status(200).json({ status: 'expired' }); return; }
     res.status(200).json({
       status: entry.state,
       sessionString: entry.sessionString || null,
