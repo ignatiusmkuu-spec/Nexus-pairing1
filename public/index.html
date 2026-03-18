@@ -876,42 +876,23 @@
     setStep(1);
   }
 
-  let pollTimer = null;
-  let currentSessionId = null;
+  let activeSSE = null;
 
-  function stopPolling() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-    currentSessionId = null;
+  function closeSSE() {
+    if (activeSSE) { activeSSE.close(); activeSSE = null; }
   }
 
-  function startPolling(id) {
-    currentSessionId = id;
-    pollTimer = setInterval(async () => {
-      try {
-        const r = await fetch(`/api/pair?action=status&id=${encodeURIComponent(id)}`);
-        const d = await r.json();
-
-        if (d.status === 'ready' && d.sessionString) {
-          stopPolling();
-          waitingMsg.style.display = 'none';
-          sessionBox.textContent = d.sessionString;
-          sessionResult.classList.add('show');
-          setStep(3);
-          showToast('DEVICE LINKED SUCCESSFULLY');
-        } else if (d.status === 'error' || d.status === 'expired') {
-          stopPolling();
-          pairingResult.classList.remove('show');
-          formSection.style.display = 'block';
-          showError(d.error || 'Session expired. Please try again.');
-          btnGenerate.disabled = false;
-          btnGenerate.innerHTML = '<span class="caret">&gt;_</span> GENERATE CODE';
-          setStep(1);
-        }
-      } catch {}
-    }, 3000);
+  function resetForm(errMsg) {
+    closeSSE();
+    pairingResult.classList.remove('show');
+    formSection.style.display = 'block';
+    btnGenerate.disabled = false;
+    btnGenerate.innerHTML = '<span class="caret">&gt;_</span> GENERATE CODE';
+    setStep(1);
+    if (errMsg) showError(errMsg);
   }
 
-  btnGenerate.addEventListener('click', async () => {
+  btnGenerate.addEventListener('click', () => {
     const phone = phoneInput.value.trim().replace(/\D/g, '');
     if (!phone || phone.length < 7) {
       showError('Enter a valid phone number with country code (e.g. 254712345678)');
@@ -919,29 +900,55 @@
     }
 
     hideError();
-    stopPolling();
+    closeSSE();
     btnGenerate.disabled = true;
     btnGenerate.innerHTML = '<span class="spinner"></span> CONNECTING...';
 
-    try {
-      const res = await fetch(`/api/pair?action=start&phone=${encodeURIComponent(phone)}`);
-      const data = await res.json();
+    const es = new EventSource(`/api/pair?phone=${encodeURIComponent(phone)}`);
+    activeSSE = es;
 
-      if (!res.ok || data.error) {
-        throw new Error(data.error || 'Failed to generate pairing code.');
+    es.addEventListener('code', (e) => {
+      try {
+        const { pairingCode } = JSON.parse(e.data);
+        pairCodeValue.textContent = pairingCode;
+        formSection.style.display = 'none';
+        pairingResult.classList.add('show');
+        setStep(2);
+      } catch {
+        resetForm('Failed to parse pairing code. Try again.');
       }
+    });
 
-      pairCodeValue.textContent = data.pairingCode;
-      formSection.style.display = 'none';
-      pairingResult.classList.add('show');
-      setStep(2);
-      startPolling(data.id);
+    es.addEventListener('session', (e) => {
+      try {
+        const { sessionString } = JSON.parse(e.data);
+        closeSSE();
+        waitingMsg.style.display = 'none';
+        sessionBox.textContent = sessionString;
+        sessionResult.classList.add('show');
+        setStep(3);
+        showToast('DEVICE LINKED SUCCESSFULLY');
+      } catch {
+        resetForm('Failed to parse session. Try again.');
+      }
+    });
 
-    } catch (err) {
-      showError(err.message || 'Connection failed. Try again.');
-      btnGenerate.disabled = false;
-      btnGenerate.innerHTML = '<span class="caret">&gt;_</span> GENERATE CODE';
-    }
+    es.addEventListener('error', (e) => {
+      let msg = 'Connection failed. Try again.';
+      try { msg = JSON.parse(e.data).message || msg; } catch {}
+      resetForm(msg);
+    });
+
+    es.onerror = (e) => {
+      if (es.readyState === EventSource.CLOSED) {
+        resetForm('Connection lost. Please try again.');
+      }
+    };
+
+    // Safety timeout: 55s (just under Vercel's 60s Lambda limit)
+    setTimeout(() => {
+      if (activeSSE === es) resetForm('Timed out. Enter the code in WhatsApp within 55 seconds.');
+    }, 55000);
   });
 
   phoneInput.addEventListener('keydown', (e) => {
