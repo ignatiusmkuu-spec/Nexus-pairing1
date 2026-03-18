@@ -2,106 +2,142 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-module.exports = async function handler(req, res) {
-  const phone = (req.query.phone || '').replace(/\D/g, '');
+// Global session store — persists across warm Lambda invocations
+const sessions = global.__nexusSessions || (global.__nexusSessions = new Map());
 
-  if (!phone || phone.length < 7) {
-    res.status(400).json({ error: 'Invalid phone number.' });
+async function startPairing(phone) {
+  const {
+    makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    makeCacheableSignalKeyStore,
+    fetchLatestBaileysVersion
+  } = require('@whiskeysockets/baileys');
+  const pino = require('pino');
+
+  const id = `${phone}_${Date.now()}`;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-'));
+
+  const { state, saveCreds } = await useMultiFileAuthState(tmpDir);
+
+  let version;
+  try {
+    const v = await fetchLatestBaileysVersion();
+    version = v.version;
+  } catch {
+    version = [2, 3000, 1015901307];
+  }
+
+  const sock = makeWASocket({
+    version,
+    logger: pino({ level: 'silent' }),
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+    },
+    printQRInTerminal: false,
+    browser: ['NEXUS-MD', 'Chrome', '3.0'],
+    generateHighQualityLinkPreview: false,
+    syncFullHistory: false
+  });
+
+  const pairingCode = await sock.requestPairingCode(phone);
+
+  sessions.set(id, { sock, tmpDir, state: 'pending', sessionString: null, error: null });
+
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect } = update;
+    const entry = sessions.get(id);
+    if (!entry) return;
+
+    if (connection === 'open') {
+      try {
+        const credsPath = path.join(tmpDir, 'creds.json');
+        const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+        entry.sessionString = 'NEXUS-MD:~' + Buffer.from(JSON.stringify(creds)).toString('base64');
+        entry.state = 'ready';
+      } catch {
+        entry.state = 'error';
+        entry.error = 'Failed to read session credentials.';
+      }
+      try { sock.end(); } catch {}
+    }
+
+    if (connection === 'close') {
+      const code = lastDisconnect?.error?.output?.statusCode;
+      if (entry.state === 'pending') {
+        entry.state = 'error';
+        entry.error = code === DisconnectReason.loggedOut
+          ? 'Logged out.'
+          : 'Connection closed. Try again.';
+      }
+    }
+  });
+
+  // Auto-cleanup after 3 minutes
+  setTimeout(() => {
+    const entry = sessions.get(id);
+    if (entry) {
+      try { entry.sock?.end(); } catch {}
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      sessions.delete(id);
+    }
+  }, 180000);
+
+  return { id, pairingCode };
+}
+
+module.exports = async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
     return;
   }
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('X-Accel-Buffering', 'no');
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const action = url.searchParams.get('action') || 'start';
 
-  function send(event, data) {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    if (typeof res.flush === 'function') res.flush();
+  // POST or GET /api/pair?action=start&phone=254...
+  if (action === 'start') {
+    const phone = (url.searchParams.get('phone') || '').replace(/\D/g, '');
+
+    if (!phone || phone.length < 7) {
+      res.status(400).json({ error: 'Invalid phone number. Include country code without +.' });
+      return;
+    }
+
+    try {
+      const { id, pairingCode } = await startPairing(phone);
+      res.status(200).json({ id, pairingCode });
+    } catch (err) {
+      console.error('startPairing error:', err);
+      res.status(500).json({ error: err.message || 'Failed to start pairing.' });
+    }
+    return;
   }
 
-  let tmpDir = null;
-  let sock = null;
+  // GET /api/pair?action=status&id=...
+  if (action === 'status') {
+    const id = url.searchParams.get('id') || '';
+    const entry = sessions.get(id);
 
-  function cleanup() {
-    if (sock) { try { sock.end(); } catch {} sock = null; }
-    if (tmpDir) { try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {} tmpDir = null; }
-  }
+    if (!entry) {
+      res.status(200).json({ status: 'expired' });
+      return;
+    }
 
-  req.on('close', cleanup);
-
-  try {
-    const {
-      makeWASocket,
-      useMultiFileAuthState,
-      DisconnectReason,
-      makeCacheableSignalKeyStore,
-      fetchLatestBaileysVersion
-    } = require('@whiskeysockets/baileys');
-
-    const pino = require('pino');
-
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-'));
-    const { state, saveCreds } = await useMultiFileAuthState(tmpDir);
-    const { version } = await fetchLatestBaileysVersion();
-
-    sock = makeWASocket({
-      version,
-      logger: pino({ level: 'silent' }),
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
-      },
-      printQRInTerminal: false,
-      browser: ['NEXUS-MD', 'Chrome', '3.0'],
-      generateHighQualityLinkPreview: false,
-      syncFullHistory: false
+    res.status(200).json({
+      status: entry.state,
+      sessionString: entry.sessionString || null,
+      error: entry.error || null
     });
-
-    const pairingCode = await sock.requestPairingCode(phone);
-    send('code', { pairingCode });
-
-    const timeoutHandle = setTimeout(() => {
-      send('error', { message: 'Pairing timed out. Please try again.' });
-      cleanup();
-      res.end();
-    }, 90000);
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', (update) => {
-      const { connection, lastDisconnect } = update;
-
-      if (connection === 'open') {
-        clearTimeout(timeoutHandle);
-        try {
-          const credsPath = path.join(tmpDir, 'creds.json');
-          const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-          const sessionString = 'NEXUS-MD:~' + Buffer.from(JSON.stringify(creds)).toString('base64');
-          send('session', { sessionString });
-        } catch (e) {
-          send('error', { message: 'Failed to generate session.' });
-        }
-        cleanup();
-        res.end();
-      }
-
-      if (connection === 'close') {
-        clearTimeout(timeoutHandle);
-        const code = lastDisconnect?.error?.output?.statusCode;
-        if (code !== DisconnectReason.loggedOut) {
-          send('error', { message: 'Connection dropped. Try again.' });
-        }
-        cleanup();
-        res.end();
-      }
-    });
-
-  } catch (err) {
-    console.error('Pair error:', err.message);
-    send('error', { message: err.message || 'Server error. Please try again.' });
-    cleanup();
-    res.end();
+    return;
   }
+
+  res.status(400).json({ error: 'Unknown action.' });
 };

@@ -1,12 +1,37 @@
 {
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/pair.js",
+      "use": "@vercel/node",
+      "config": {
+        "bundle": false,
+        "maxLambdaSize": "100mb"
+      }
+    },
+    {
+      "src": "public/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/pair",
+      "dest": "/api/pair.js"
+    },
+    {
+      "src": "/nexus_drill.mp3",
+      "dest": "/public/nexus_drill.mp3"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/index.html"
+    }
+  ],
   "functions": {
     "api/pair.js": {
-      "maxDuration": 300,
+      "maxDuration": 60,
       "memory": 1024
     }
-  },
-  "rewrites": [
-    { "source": "/api/pair", "destination": "/api/pair" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+  }
 }
