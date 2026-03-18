@@ -1,12 +1,18 @@
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Pre-load at module level so Lambda cold-start doesn't eat into the 60s budget
-const baileysPromise = import('@whiskeysockets/baileys');
-const pinoPromise = import('pino');
+import {
+  makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  makeCacheableSignalKeyStore,
+  fetchLatestBaileysVersion
+} from '@whiskeysockets/baileys';
+import pino from 'pino';
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
@@ -20,22 +26,24 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  // SSE — keeps Lambda alive while user links device in WhatsApp
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
   function send(event, data) {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    if (typeof res.flush === 'function') res.flush();
+    try {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (typeof res.flush === 'function') res.flush();
+    } catch {}
   }
 
-  // Keep-alive ping every 20s so proxies don't drop the connection
   const pingInterval = setInterval(() => {
-    res.write(': ping\n\n');
-    if (typeof res.flush === 'function') res.flush();
-  }, 20000);
+    try {
+      res.write(': ping\n\n');
+      if (typeof res.flush === 'function') res.flush();
+    } catch {}
+  }, 15000);
 
   let tmpDir = null;
   let sock = null;
@@ -49,16 +57,6 @@ module.exports = async function handler(req, res) {
   req.on('close', cleanup);
 
   try {
-    const {
-      makeWASocket,
-      useMultiFileAuthState,
-      DisconnectReason,
-      makeCacheableSignalKeyStore,
-      fetchLatestBaileysVersion
-    } = await baileysPromise;
-
-    const pino = (await pinoPromise).default;
-
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-'));
     const { state, saveCreds } = await useMultiFileAuthState(tmpDir);
 
@@ -91,7 +89,7 @@ module.exports = async function handler(req, res) {
 
     sock.ev.on('creds.update', saveCreds);
 
-    const done = new Promise((resolve) => {
+    await new Promise((resolve) => {
       sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect } = update;
 
@@ -101,7 +99,7 @@ module.exports = async function handler(req, res) {
             const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
             const sessionString = 'NEXUS-MD:~' + Buffer.from(JSON.stringify(creds)).toString('base64');
             send('session', { sessionString });
-          } catch {
+          } catch (e) {
             send('error', { message: 'Linked but failed to read session. Try again.' });
           }
           resolve();
@@ -109,22 +107,21 @@ module.exports = async function handler(req, res) {
 
         if (connection === 'close') {
           const code = lastDisconnect?.error?.output?.statusCode;
-          if (code !== DisconnectReason.loggedOut) {
-            send('error', { message: 'WhatsApp connection closed. Please try again.' });
-          }
+          send('error', {
+            message: code === DisconnectReason.loggedOut
+              ? 'Account logged out. Try again.'
+              : 'WhatsApp disconnected. Please try again.'
+          });
           resolve();
         }
       });
     });
 
-    await done;
-    cleanup();
-    res.end();
-
   } catch (err) {
-    console.error('pair error:', err.message);
+    console.error('NEXUS pair error:', err.message);
     send('error', { message: err.message || 'Server error. Please try again.' });
+  } finally {
     cleanup();
-    res.end();
+    try { res.end(); } catch {}
   }
-};
+}

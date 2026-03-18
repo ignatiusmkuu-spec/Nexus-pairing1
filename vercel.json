@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/pair.js",
+      "src": "api/pair.mjs",
       "use": "@vercel/node",
       "config": {
         "bundle": false,
@@ -19,7 +19,7 @@
   "routes": [
     {
       "src": "/api/pair",
-      "dest": "/api/pair.js"
+      "dest": "/api/pair.mjs"
     },
     {
       "src": "/nexus_drill.mp3",

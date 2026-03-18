@@ -939,9 +939,9 @@
       resetForm(msg);
     });
 
-    es.onerror = (e) => {
-      if (es.readyState === EventSource.CLOSED) {
-        resetForm('Connection lost. Please try again.');
+    es.onerror = () => {
+      if (activeSSE === es) {
+        resetForm('Connection failed. Check your number and try again.');
       }
     };
 
