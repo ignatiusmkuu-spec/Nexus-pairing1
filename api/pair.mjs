@@ -7,11 +7,27 @@ import {
   useMultiFileAuthState,
   DisconnectReason,
   makeCacheableSignalKeyStore,
-  fetchLatestBaileysVersion
+  fetchLatestBaileysVersion,
+  Browsers
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
 
-async function runPairing(phone, send) {
+const WS_URLS = [
+  'wss://web.whatsapp.com/ws/chat',
+  'wss://g.whatsapp.net/ws/chat'
+];
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Returns:
+ *   { status: 'ok', sessionString }
+ *   { status: 'rejected', code: <statusCode> }
+ *   { status: 'error', message }
+ *
+ * Calls send('code', { pairingCode }) immediately when code is ready.
+ */
+async function attemptPairing(phone, wsUrl, send) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-'));
   let sock = null;
 
@@ -36,55 +52,39 @@ async function runPairing(phone, send) {
         keys: makeCacheableSignalKeyStore(state.keys, logger)
       },
       printQRInTerminal: false,
-      browser: ['NEXUS-MD', 'Chrome', '3.0'],
+      browser: Browsers.appropriate('Chrome'),
+      waWebSocketUrl: wsUrl,
       generateHighQualityLinkPreview: false,
       syncFullHistory: false,
-      connectTimeoutMs: 30000
+      connectTimeoutMs: 30000,
+      keepAliveIntervalMs: 10000
     });
 
-    // Request pairing code — throws if WhatsApp rejects the phone
+    // Get and immediately broadcast the pairing code
     const pairingCode = await sock.requestPairingCode(phone);
     send('code', { pairingCode });
 
     sock.ev.on('creds.update', saveCreds);
 
-    // Wait for connection to open (success) or close (failure)
-    // Track whether we already succeeded so a post-open close doesn't overwrite the result
     let succeeded = false;
 
-    await new Promise((resolve) => {
-      sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
-
+    return await new Promise((resolve) => {
+      sock.ev.on('connection.update', ({ connection, lastDisconnect }) => {
         if (connection === 'open') {
           succeeded = true;
-          // Use the in-memory creds — they are up to date at this point.
-          // Do NOT read from disk; the file write may still be in flight.
           try {
             const sessionString =
               'NEXUS-MD:~' + Buffer.from(JSON.stringify(state.creds)).toString('base64');
-            send('session', { sessionString });
-          } catch (e) {
-            send('error', { message: 'Linked but could not export session. Try again.' });
+            resolve({ status: 'ok', sessionString });
+          } catch {
+            resolve({ status: 'error', message: 'Linked but could not export session. Try again.' });
           }
-          resolve();
         }
 
         if (connection === 'close') {
-          if (succeeded) {
-            // Normal post-open disconnect — ignore, session was already sent
-            resolve();
-            return;
-          }
+          if (succeeded) return; // normal post-open close, ignore
           const code = lastDisconnect?.error?.output?.statusCode;
-          const reason =
-            code === DisconnectReason.loggedOut
-              ? 'WhatsApp rejected the request. Wait a moment and try again.'
-              : code === DisconnectReason.forbidden
-              ? 'Pairing forbidden by WhatsApp. Try a different number or wait.'
-              : 'WhatsApp disconnected. Please try again.';
-          send('error', { message: reason });
-          resolve();
+          resolve({ status: 'rejected', code });
         }
       });
     });
@@ -109,7 +109,6 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Server-Sent Events — keeps the Lambda alive while user links device
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -122,19 +121,58 @@ export default async function handler(req, res) {
     } catch {}
   }
 
-  // Keep-alive ping every 15 s so reverse proxies don't drop the stream
   const pingInterval = setInterval(() => {
-    try {
-      res.write(': ping\n\n');
-      if (typeof res.flush === 'function') res.flush();
-    } catch {}
+    try { res.write(': ping\n\n'); if (typeof res.flush === 'function') res.flush(); } catch {}
   }, 15000);
 
   try {
-    await runPairing(phone, send);
-  } catch (err) {
-    console.error('NEXUS pair error:', err.message);
-    send('error', { message: err.message || 'Server error. Please try again.' });
+    for (let i = 0; i < WS_URLS.length; i++) {
+      if (i > 0) {
+        send('status', { message: 'Retrying via alternate server...' });
+        await sleep(4000);
+      }
+
+      let result;
+      try {
+        result = await attemptPairing(phone, WS_URLS[i], send);
+      } catch (err) {
+        if (i < WS_URLS.length - 1) continue;
+        send('error', { message: err.message || 'Failed to connect to WhatsApp.' });
+        break;
+      }
+
+      if (result.status === 'ok') {
+        send('session', { sessionString: result.sessionString });
+        break;
+      }
+
+      if (result.status === 'error') {
+        send('error', { message: result.message });
+        break;
+      }
+
+      // status === 'rejected'
+      const { code } = result;
+
+      if (code === DisconnectReason.forbidden) {
+        send('error', { message: 'Pairing blocked by WhatsApp. Try a different number or wait 10 minutes.' });
+        break;
+      }
+
+      if (code === DisconnectReason.loggedOut && i < WS_URLS.length - 1) {
+        // Try next endpoint
+        continue;
+      }
+
+      // All endpoints exhausted or other disconnect
+      send('error', {
+        message: code === DisconnectReason.loggedOut
+          ? 'WhatsApp rejected the session. Wait 5-10 minutes then try again.'
+          : 'WhatsApp disconnected unexpectedly. Please try again.'
+      });
+      break;
+    }
+
   } finally {
     clearInterval(pingInterval);
     try { res.end(); } catch {}
