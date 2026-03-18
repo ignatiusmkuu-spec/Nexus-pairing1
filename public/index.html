@@ -775,9 +775,6 @@
   setInterval(drawMatrix, 40);
 
   // App state
-  let sessionId = null;
-  let pollInterval = null;
-
   const phoneInput = document.getElementById('phone-input');
   const btnGenerate = document.getElementById('btn-generate');
   const errorMsg = document.getElementById('error-msg');
@@ -846,19 +843,21 @@
   });
 
   function resetApp() {
-    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-    sessionId = null;
+    if (activeSource) { activeSource.close(); activeSource = null; }
     phoneInput.value = '';
     hideError();
     formSection.style.display = 'block';
     pairingResult.classList.remove('show');
     sessionResult.classList.remove('show');
+    waitingMsg.style.display = '';
     btnGenerate.disabled = false;
     btnGenerate.innerHTML = '<span class="caret">&gt;_</span> GENERATE CODE';
     setStep(1);
   }
 
-  btnGenerate.addEventListener('click', async () => {
+  let activeSource = null;
+
+  btnGenerate.addEventListener('click', () => {
     const phone = phoneInput.value.trim().replace(/\D/g, '');
     if (!phone || phone.length < 7) {
       showError('Enter a valid phone number with country code (e.g. 254712345678)');
@@ -869,57 +868,54 @@
     btnGenerate.disabled = true;
     btnGenerate.innerHTML = '<span class="spinner"></span> CONNECTING...';
 
-    try {
-      const res = await fetch('/api/pair', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone })
-      });
+    if (activeSource) { activeSource.close(); activeSource = null; }
 
-      const data = await res.json();
+    const evtSource = new EventSource(`/api/pair?phone=${encodeURIComponent(phone)}`);
+    activeSource = evtSource;
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to generate code');
-      }
-
-      sessionId = data.sessionId;
-      pairCodeValue.textContent = data.pairingCode;
+    evtSource.addEventListener('code', (e) => {
+      const { pairingCode } = JSON.parse(e.data);
+      pairCodeValue.textContent = pairingCode;
       formSection.style.display = 'none';
       pairingResult.classList.add('show');
       setStep(2);
+    });
 
-      // Poll for session
-      pollInterval = setInterval(async () => {
-        try {
-          const r = await fetch(`/api/session/${sessionId}`);
-          const d = await r.json();
+    evtSource.addEventListener('session', (e) => {
+      const { sessionString } = JSON.parse(e.data);
+      evtSource.close();
+      activeSource = null;
+      waitingMsg.style.display = 'none';
+      sessionBox.textContent = sessionString;
+      sessionResult.classList.add('show');
+      setStep(3);
+      showToast('DEVICE LINKED SUCCESSFULLY');
+    });
 
-          if (d.status === 'ready') {
-            clearInterval(pollInterval);
-            pollInterval = null;
-            waitingMsg.style.display = 'none';
-            sessionBox.textContent = d.sessionString;
-            sessionResult.classList.add('show');
-            setStep(3);
-            showToast('DEVICE LINKED SUCCESSFULLY');
-          } else if (d.status === 'expired') {
-            clearInterval(pollInterval);
-            pollInterval = null;
-            showError('Session expired. Please generate a new code.');
-            pairingResult.classList.remove('show');
-            formSection.style.display = 'block';
-            btnGenerate.disabled = false;
-            btnGenerate.innerHTML = '<span class="caret">&gt;_</span> GENERATE CODE';
-            setStep(1);
-          }
-        } catch {}
-      }, 3000);
-
-    } catch (err) {
-      showError(err.message || 'Connection failed. Try again.');
+    evtSource.addEventListener('error', (e) => {
+      evtSource.close();
+      activeSource = null;
+      let msg = 'Connection failed. Try again.';
+      try { msg = JSON.parse(e.data).message; } catch {}
+      pairingResult.classList.remove('show');
+      formSection.style.display = 'block';
+      showError(msg);
       btnGenerate.disabled = false;
       btnGenerate.innerHTML = '<span class="caret">&gt;_</span> GENERATE CODE';
-    }
+      setStep(1);
+    });
+
+    evtSource.onerror = (e) => {
+      if (evtSource.readyState === EventSource.CLOSED) return;
+      evtSource.close();
+      activeSource = null;
+      pairingResult.classList.remove('show');
+      formSection.style.display = 'block';
+      showError('Connection lost. Please try again.');
+      btnGenerate.disabled = false;
+      btnGenerate.innerHTML = '<span class="caret">&gt;_</span> GENERATE CODE';
+      setStep(1);
+    };
   });
 
   phoneInput.addEventListener('keydown', (e) => {
