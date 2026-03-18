@@ -1,15 +1,8 @@
-const express = require('express');
-const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const path = require('path');
 
-const app = express();
-const PORT = process.env.PORT || 5000;
-
-app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.get('/api/pair', async (req, res) => {
+module.exports = async function handler(req, res) {
   const phone = (req.query.phone || '').replace(/\D/g, '');
 
   if (!phone || phone.length < 7) {
@@ -20,8 +13,8 @@ app.get('/api/pair', async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
 
   function send(event, data) {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -46,6 +39,7 @@ app.get('/api/pair', async (req, res) => {
       makeCacheableSignalKeyStore,
       fetchLatestBaileysVersion
     } = require('@whiskeysockets/baileys');
+
     const pino = require('pino');
 
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-'));
@@ -86,7 +80,7 @@ app.get('/api/pair', async (req, res) => {
           const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
           const sessionString = 'NEXUS-MD:~' + Buffer.from(JSON.stringify(creds)).toString('base64');
           send('session', { sessionString });
-        } catch {
+        } catch (e) {
           send('error', { message: 'Failed to generate session.' });
         }
         cleanup();
@@ -110,22 +104,4 @@ app.get('/api/pair', async (req, res) => {
     cleanup();
     res.end();
   }
-});
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`NEXUS-MD Pairing Server running on http://0.0.0.0:${PORT}`);
-});
-
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`Port ${PORT} busy, retrying in 2s...`);
-    setTimeout(() => {
-      server.close();
-      server.listen(PORT, '0.0.0.0');
-    }, 2000);
-  }
-});
+};

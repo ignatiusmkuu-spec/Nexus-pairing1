@@ -1,24 +1,12 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "server.js",
-      "use": "@vercel/node",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "server.js"
-    }
-  ],
   "functions": {
-    "server.js": {
+    "api/pair.js": {
       "maxDuration": 300,
-      "memory": 512
+      "memory": 1024
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/pair", "destination": "/api/pair" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
