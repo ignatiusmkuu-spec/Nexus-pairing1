@@ -16,46 +16,50 @@ app.use((req, res, next) => {
   next();
 });
 
-const WS_URLS = [
-  'wss://web.whatsapp.com/ws/chat',
-  'wss://g.whatsapp.net/ws/chat',
-  'wss://w1.web.whatsapp.com/ws/chat',
-  'wss://w2.web.whatsapp.com/ws/chat'
-];
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function attemptPairing(phone, wsUrl, send, signal) {
+// Each attempt config: optionally override wsUrl and browser
+const ATTEMPT_CONFIGS = [
+  { label: 'default server',    wsUrl: null,                              browser: ['Ubuntu',  'Chrome',  '22.04'] },
+  { label: 'alternate server A', wsUrl: 'wss://web.whatsapp.com/ws/chat', browser: ['Windows', 'Chrome',  '10']    },
+  { label: 'alternate server B', wsUrl: 'wss://g.whatsapp.net/ws/chat',   browser: ['Ubuntu',  'Firefox', '22.04'] },
+  { label: 'alternate server C', wsUrl: 'wss://w1.web.whatsapp.com/ws/chat', browser: ['MacOS', 'Safari', '16']   },
+];
+
+async function attemptPairing(phone, config, send, signal) {
   const {
     makeWASocket,
     useMultiFileAuthState,
     DisconnectReason,
     makeCacheableSignalKeyStore,
-    fetchLatestBaileysVersion,
-    Browsers
+    fetchLatestBaileysVersion
   } = await import('@whiskeysockets/baileys');
   const pino = (await import('pino')).default;
+
+  if (signal?.aborted) throw new Error('Request cancelled');
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexus-'));
   let sock = null;
   let latestCreds = null;
+  let pairCodeSent = false;
 
   try {
     const { state, saveCreds } = await useMultiFileAuthState(tmpDir);
 
     let version;
     try {
-      const v = await fetchLatestBaileysVersion();
-      version = v.version;
+      const result = await Promise.race([
+        fetchLatestBaileysVersion(),
+        sleep(8000).then(() => { throw new Error('version fetch timeout'); })
+      ]);
+      version = result.version;
     } catch {
       version = [2, 3000, 1015901307];
     }
 
     const logger = pino({ level: 'silent' });
 
-    if (signal?.aborted) throw new Error('Request cancelled');
-
-    sock = makeWASocket({
+    const sockOpts = {
       version,
       logger,
       auth: {
@@ -63,40 +67,70 @@ async function attemptPairing(phone, wsUrl, send, signal) {
         keys: makeCacheableSignalKeyStore(state.keys, logger)
       },
       printQRInTerminal: false,
-      browser: Browsers.appropriate('Chrome'),
-      waWebSocketUrl: wsUrl,
+      browser: config.browser,
       generateHighQualityLinkPreview: false,
       syncFullHistory: false,
-      connectTimeoutMs: 25000,
-      keepAliveIntervalMs: 8000,
-      retryRequestDelayMs: 2000,
-      fireInitQueries: false
-    });
+      connectTimeoutMs: 30000,
+      keepAliveIntervalMs: 10000,
+      retryRequestDelayMs: 3000,
+      fireInitQueries: false,
+      getMessage: async () => ({ conversation: '' })
+    };
 
-    sock.ev.on('creds.update', async (update) => {
+    if (config.wsUrl) {
+      sockOpts.waWebSocketUrl = config.wsUrl;
+    }
+
+    sock = makeWASocket(sockOpts);
+
+    sock.ev.on('creds.update', async () => {
       try {
         await saveCreds();
         latestCreds = JSON.parse(JSON.stringify(state.creds));
       } catch {}
     });
 
+    // Wait for connecting state before requesting pairing code
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('Socket did not connect in time')), 15000);
+      const check = ({ connection }) => {
+        if (connection === 'connecting' || connection === 'open') {
+          clearTimeout(t);
+          sock.ev.off('connection.update', check);
+          resolve();
+        }
+        if (connection === 'close') {
+          clearTimeout(t);
+          sock.ev.off('connection.update', check);
+          reject(new Error('Socket closed before connecting'));
+        }
+      };
+      sock.ev.on('connection.update', check);
+    });
+
+    if (signal?.aborted) throw new Error('Request cancelled');
+
+    // Small delay to let the socket stabilise
+    await sleep(800);
+
     let pairingCode;
     try {
       pairingCode = await sock.requestPairingCode(phone);
     } catch (err) {
-      throw new Error('Failed to request pairing code: ' + (err.message || 'unknown error'));
+      throw new Error('Could not request pairing code: ' + (err.message || 'unknown'));
     }
 
+    if (!pairingCode) throw new Error('Empty pairing code returned by WhatsApp');
+
+    pairCodeSent = true;
     send('code', { pairingCode });
 
     let succeeded = false;
 
-    return await new Promise((resolve, reject) => {
+    return await new Promise((resolve) => {
       const timeout = setTimeout(() => {
-        if (!succeeded) {
-          resolve({ status: 'timeout' });
-        }
-      }, 90000);
+        if (!succeeded) resolve({ status: 'timeout' });
+      }, 95000);
 
       if (signal) {
         signal.addEventListener('abort', () => {
@@ -109,21 +143,30 @@ async function attemptPairing(phone, wsUrl, send, signal) {
         if (connection === 'open') {
           succeeded = true;
           clearTimeout(timeout);
-          await sleep(1200);
+          await sleep(1500);
           try {
             const credsToUse = latestCreds || state.creds;
             const sessionString = 'NEXUS-MD:~' + Buffer.from(JSON.stringify(credsToUse)).toString('base64');
             resolve({ status: 'ok', sessionString });
-          } catch (e) {
-            resolve({ status: 'error', message: 'Linked but could not export session. Try again.' });
+          } catch {
+            resolve({ status: 'error', message: 'Device linked but session export failed. Try again.' });
           }
+          return;
         }
 
         if (connection === 'close') {
           if (succeeded) return;
           clearTimeout(timeout);
-          const code = lastDisconnect?.error?.output?.statusCode;
-          resolve({ status: 'rejected', code });
+          const statusCode = lastDisconnect?.error?.output?.statusCode;
+          const reason = lastDisconnect?.error?.message || '';
+
+          // If the code was already sent and WA closes, it could be a recoverable disconnect
+          if (pairCodeSent && statusCode === undefined) {
+            // Network blip after code sent — keep waiting if within timeout
+            return;
+          }
+
+          resolve({ status: 'rejected', code: statusCode, reason });
         }
       });
     });
@@ -135,7 +178,7 @@ async function attemptPairing(phone, wsUrl, send, signal) {
     }
     setTimeout(() => {
       try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-    }, 3000);
+    }, 4000);
   }
 }
 
@@ -176,25 +219,28 @@ app.get('/api/pair', async (req, res) => {
   const { DisconnectReason } = await import('@whiskeysockets/baileys');
 
   try {
-    let lastErr = null;
-    for (let i = 0; i < WS_URLS.length; i++) {
+    let lastErr = 'Unknown error';
+
+    for (let i = 0; i < ATTEMPT_CONFIGS.length; i++) {
       if (abortController.aborted) break;
 
-      if (i > 0) {
-        send('status', { message: `Retrying via alternate server ${i + 1}/${WS_URLS.length}...` });
-        await sleep(3000);
+      const cfg = ATTEMPT_CONFIGS[i];
+
+      if (i === 0) {
+        send('status', { message: 'Connecting to WhatsApp...' });
       } else {
-        send('status', { message: 'Connecting to WhatsApp servers...' });
+        send('status', { message: `Trying ${cfg.label} (${i + 1}/${ATTEMPT_CONFIGS.length})...` });
+        await sleep(2500);
       }
 
       if (abortController.aborted) break;
 
       let result;
       try {
-        result = await attemptPairing(phone, WS_URLS[i], send, abortController);
+        result = await attemptPairing(phone, cfg, send, abortController);
       } catch (err) {
-        lastErr = err.message || 'Unknown error';
-        send('status', { message: `Server ${i + 1} failed, trying next...` });
+        lastErr = err.message || 'Connection error';
+        send('status', { message: `${cfg.label} failed — trying next...` });
         continue;
       }
 
@@ -206,7 +252,7 @@ app.get('/api/pair', async (req, res) => {
       if (result.status === 'cancelled') break;
 
       if (result.status === 'timeout') {
-        send('error', { message: 'Pairing timed out. Make sure you entered the code in WhatsApp within 90 seconds.' });
+        send('error', { message: 'Timed out waiting for device link. Enter the code in WhatsApp within 90 seconds.' });
         return;
       }
 
@@ -215,32 +261,39 @@ app.get('/api/pair', async (req, res) => {
         return;
       }
 
-      const { code } = result;
+      const { code, reason } = result;
 
       if (code === DisconnectReason.forbidden) {
-        send('error', { message: 'Pairing blocked by WhatsApp. Try a different number or wait 10–15 minutes.' });
+        send('error', { message: 'WhatsApp blocked this pairing attempt. Try a different number or wait 10–15 minutes.' });
         return;
       }
 
-      if (code === DisconnectReason.loggedOut && i < WS_URLS.length - 1) {
-        lastErr = 'Session rejected, trying alternate server...';
+      if (code === DisconnectReason.loggedOut) {
+        if (i < ATTEMPT_CONFIGS.length - 1) {
+          lastErr = 'Session rejected by WhatsApp, trying alternate...';
+          continue;
+        }
+        send('error', { message: 'WhatsApp rejected this number. Wait 5–10 minutes then try again.' });
+        return;
+      }
+
+      // For other codes, retry unless we're on the last config
+      if (i < ATTEMPT_CONFIGS.length - 1) {
+        lastErr = reason || `Disconnected (code ${code}), retrying...`;
+        send('status', { message: `Disconnected — trying ${ATTEMPT_CONFIGS[i + 1].label}...` });
         continue;
       }
 
-      send('error', {
-        message: code === DisconnectReason.loggedOut
-          ? 'WhatsApp rejected the session. Wait 5–10 minutes then try again.'
-          : 'WhatsApp disconnected unexpectedly. Please try again.'
-      });
+      send('error', { message: reason || 'WhatsApp disconnected. Please try again in a few minutes.' });
       return;
     }
 
-    if (!closed) {
-      send('error', { message: lastErr || 'All servers failed. Please try again in a few minutes.' });
+    if (!closed && abortController.aborted === false) {
+      send('error', { message: lastErr || 'All connection attempts failed. Please try again shortly.' });
     }
 
   } catch (err) {
-    send('error', { message: err.message || 'An unexpected error occurred.' });
+    send('error', { message: err.message || 'An unexpected server error occurred.' });
   } finally {
     clearInterval(pingInterval);
     if (!closed) {

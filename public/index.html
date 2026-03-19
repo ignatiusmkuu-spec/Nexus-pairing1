@@ -693,6 +693,33 @@
       color: var(--text-dim);
       letter-spacing: 1px;
     }
+    .btn-copy-code {
+      width: 100%;
+      background: rgba(0,255,136,0.08);
+      border: 1px solid var(--green);
+      border-radius: 3px;
+      color: var(--green);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.75rem;
+      letter-spacing: 3px;
+      padding: 0.65rem;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    .btn-copy-code:hover {
+      background: rgba(0,255,136,0.18);
+      box-shadow: 0 0 16px rgba(0,255,136,0.15);
+    }
+    .btn-copy-code.copied {
+      border-color: var(--green-dim);
+      color: var(--green-dim);
+      background: rgba(0,255,136,0.14);
+    }
     .waiting-msg {
       font-size: 0.65rem;
       color: var(--text-dim);
@@ -1118,10 +1145,13 @@
       <div class="pairing-result" id="pairing-result">
         <div class="pair-code-label">// PAIRING CODE — ENTER IN WHATSAPP</div>
         <div class="pair-code-box" id="pair-code-box" title="Click to copy">
-          <span class="copy-badge">CLICK TO COPY</span>
+          <span class="copy-badge">TAP TO COPY</span>
           <div class="pair-code-value" id="pair-code-value">--------</div>
           <div class="pair-code-hint">WhatsApp → Linked Devices → Link with phone number</div>
         </div>
+        <button class="btn-copy-code" id="btn-copy-code">
+          📋 COPY PAIRING CODE
+        </button>
         <div class="waiting-msg" id="waiting-msg">
           <span class="spinner"></span>
           AWAITING DEVICE LINK
@@ -1223,6 +1253,7 @@
   const btnCopySession  = document.getElementById('btn-copy-session');
   const btnNew          = document.getElementById('btn-new');
   const btnBack         = document.getElementById('btn-back');
+  const btnCopyCode     = document.getElementById('btn-copy-code');
   const step1 = document.getElementById('step1');
   const step2 = document.getElementById('step2');
   const step3 = document.getElementById('step3');
@@ -1325,7 +1356,20 @@
   }
 
   // ── Pairing events ────────────────────────────────────────────
-  pairCodeBox.addEventListener('click', () => copyText(pairCodeValue.textContent));
+  pairCodeBox.addEventListener('click', () => copyCode());
+  btnCopyCode.addEventListener('click', () => copyCode());
+
+  function copyCode() {
+    const code = pairCodeValue.textContent.trim();
+    if (!code || code === '--------') return;
+    copyText(code);
+    btnCopyCode.textContent = '✅ CODE COPIED!';
+    btnCopyCode.classList.add('copied');
+    setTimeout(() => {
+      btnCopyCode.innerHTML = '📋 COPY PAIRING CODE';
+      btnCopyCode.classList.remove('copied');
+    }, 2500);
+  }
   btnCopySession.addEventListener('click', () => copyText(sessionBox.textContent));
   sessionBox.addEventListener('click', () => copyText(sessionBox.textContent));
   btnNew.addEventListener('click', resetApp);
