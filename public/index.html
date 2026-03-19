@@ -14,28 +14,23 @@
       --green-border: rgba(0,255,136,0.25);
       --bg: #080d0a;
       --card: #0c1410;
+      --card2: #0a1210;
       --text: #cce8d4;
       --text-dim: #557a62;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    html { scroll-behavior: smooth; }
+
     body {
       font-family: 'Share Tech Mono', monospace;
       background: var(--bg);
       color: var(--text);
       min-height: 100dvh;
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
       overflow-y: auto;
       overflow-x: hidden;
       position: relative;
-      padding-bottom: 1rem;
-    }
-
-    @media (min-height: 700px) {
-      body { align-items: center; }
     }
 
     /* Matrix rain canvas */
@@ -44,7 +39,8 @@
       top: 0; left: 0;
       width: 100%; height: 100%;
       z-index: 0;
-      opacity: 0.12;
+      opacity: 0.10;
+      pointer-events: none;
     }
 
     /* Scanlines overlay */
@@ -64,19 +60,354 @@
       z-index: 1;
     }
 
-    .wrapper {
-      position: relative;
-      z-index: 2;
-      width: 100%;
-      max-width: 480px;
-      padding: 0.75rem;
+    /* ── HUD BAR ── */
+    .hud-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.4rem 1rem;
+      background: rgba(8,13,10,0.92);
+      border-bottom: 1px solid rgba(0,255,136,0.12);
+      backdrop-filter: blur(8px);
+      gap: 0.75rem;
     }
 
+    .player-hud {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+    }
+    .player-btn {
+      width: 24px; height: 24px;
+      border: 1px solid var(--green-border);
+      border-radius: 50%;
+      background: rgba(0,255,136,0.06);
+      color: var(--green);
+      font-size: 0.65rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+      flex-shrink: 0;
+      padding: 0;
+      line-height: 1;
+    }
+    .player-btn:hover {
+      background: rgba(0,255,136,0.15);
+      border-color: var(--green);
+      box-shadow: 0 0 8px rgba(0,255,136,0.2);
+    }
+    .player-btn.playing {
+      border-color: var(--green);
+      background: rgba(0,255,136,0.12);
+      box-shadow: 0 0 10px rgba(0,255,136,0.25);
+    }
+    .player-track {
+      font-size: 0.55rem;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+    .player-track .track-name { color: var(--green); }
+    .player-progress {
+      flex: 1;
+      min-width: 30px;
+      height: 3px;
+      background: rgba(0,255,136,0.1);
+      border-radius: 2px;
+      cursor: pointer;
+      position: relative;
+    }
+    .player-progress-fill {
+      height: 100%;
+      background: var(--green);
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.3s linear;
+      pointer-events: none;
+    }
+    .equalizer {
+      display: flex;
+      align-items: flex-end;
+      gap: 2px;
+      height: 14px;
+    }
+    .eq-bar {
+      width: 3px;
+      background: var(--green);
+      border-radius: 1px;
+      opacity: 0.7;
+    }
+    .eq-bar:nth-child(1) { animation: eq1 0.5s ease-in-out infinite alternate; }
+    .eq-bar:nth-child(2) { animation: eq2 0.4s ease-in-out infinite alternate; }
+    .eq-bar:nth-child(3) { animation: eq3 0.6s ease-in-out infinite alternate; }
+    .eq-bar:nth-child(4) { animation: eq4 0.35s ease-in-out infinite alternate; }
+    @keyframes eq1 { from { height: 3px; } to { height: 12px; } }
+    @keyframes eq2 { from { height: 6px; } to { height: 10px; } }
+    @keyframes eq3 { from { height: 4px; } to { height: 14px; } }
+    @keyframes eq4 { from { height: 8px; } to { height: 5px; } }
+    .equalizer.paused .eq-bar { animation-play-state: paused; height: 4px !important; }
+
+    .battery-hud {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.6rem;
+      color: var(--text-dim);
+      letter-spacing: 1px;
+      white-space: nowrap;
+    }
+    .battery-shell {
+      width: 28px; height: 13px;
+      border: 1px solid var(--green-border);
+      border-radius: 2px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      padding: 2px;
+    }
+    .battery-shell::after {
+      content: '';
+      position: absolute;
+      right: -4px; top: 50%;
+      transform: translateY(-50%);
+      width: 3px; height: 6px;
+      background: var(--green-border);
+      border-radius: 0 1px 1px 0;
+    }
+    .battery-fill {
+      height: 100%;
+      background: var(--green);
+      border-radius: 1px;
+      transition: width 0.5s, background 0.5s;
+    }
+    .battery-fill.low { background: #ff4444; }
+    .battery-fill.med { background: #ffaa00; }
+    .battery-charging { font-size: 0.65rem; color: var(--green); }
+    .battery-pct { color: var(--green); font-size: 0.6rem; }
+
+    /* ── MAIN SCROLL CONTAINER ── */
+    .page {
+      position: relative;
+      z-index: 2;
+      padding-top: 2.8rem;
+      padding-bottom: 4rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+
+    /* ── HERO SECTION ── */
+    .hero {
+      width: 100%;
+      max-width: 680px;
+      padding: 3.5rem 1.5rem 2rem;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.58rem;
+      letter-spacing: 3px;
+      color: var(--green);
+      border: 1px solid rgba(0,255,136,0.2);
+      border-radius: 2px;
+      padding: 0.3rem 0.75rem;
+      margin-bottom: 1.25rem;
+      background: rgba(0,255,136,0.04);
+    }
+    .hero-dot {
+      width: 6px; height: 6px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: blink 1.5s infinite;
+      box-shadow: 0 0 6px var(--green);
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .hero h1 {
+      font-family: 'Orbitron', sans-serif;
+      font-size: clamp(1.8rem, 5vw, 2.8rem);
+      font-weight: 900;
+      color: #fff;
+      line-height: 1.15;
+      margin-bottom: 0.6rem;
+      text-shadow: 0 0 30px rgba(0,255,136,0.2);
+    }
+    .hero h1 span { color: var(--green); }
+    .hero p {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      line-height: 1.7;
+      max-width: 480px;
+      margin: 0 auto 2rem;
+    }
+    .hero-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: transparent;
+      border: 1px solid var(--green);
+      border-radius: 3px;
+      color: var(--green);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.78rem;
+      letter-spacing: 2px;
+      padding: 0.65rem 1.5rem;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+      text-decoration: none;
+    }
+    .hero-cta:hover {
+      background: rgba(0,255,136,0.08);
+      box-shadow: 0 0 20px rgba(0,255,136,0.15);
+    }
+
+    /* ── SCROLL DIVIDER ── */
+    .divider {
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0 1.5rem;
+      margin: 0.5rem 0;
+    }
+    .divider-line {
+      flex: 1;
+      height: 1px;
+      background: rgba(0,255,136,0.1);
+    }
+    .divider-label {
+      font-size: 0.55rem;
+      letter-spacing: 3px;
+      color: var(--text-dim);
+    }
+
+    /* ── FEATURE PADS (scrollable row) ── */
+    .pads-section {
+      width: 100%;
+      max-width: 720px;
+      padding: 0 1rem;
+    }
+    .pads-label {
+      font-size: 0.58rem;
+      letter-spacing: 3px;
+      color: var(--text-dim);
+      padding: 0 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    .pads-row {
+      display: flex;
+      gap: 0.75rem;
+      overflow-x: auto;
+      padding: 0.25rem 0.5rem 1rem;
+      scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0,255,136,0.2) transparent;
+    }
+    .pads-row::-webkit-scrollbar { height: 4px; }
+    .pads-row::-webkit-scrollbar-track { background: transparent; }
+    .pads-row::-webkit-scrollbar-thumb { background: rgba(0,255,136,0.2); border-radius: 2px; }
+
+    .pad {
+      flex: 0 0 200px;
+      background: var(--card);
+      border: 1px solid rgba(0,255,136,0.12);
+      border-radius: 4px;
+      padding: 1.25rem 1rem;
+      scroll-snap-align: start;
+      transition: border-color 0.25s, box-shadow 0.25s;
+    }
+    .pad:hover {
+      border-color: rgba(0,255,136,0.3);
+      box-shadow: 0 0 18px rgba(0,255,136,0.06);
+    }
+    .pad-icon {
+      font-size: 1.3rem;
+      margin-bottom: 0.6rem;
+    }
+    .pad-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.62rem;
+      color: var(--green);
+      letter-spacing: 2px;
+      margin-bottom: 0.4rem;
+    }
+    .pad-text {
+      font-size: 0.6rem;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    /* ── HOW IT WORKS STEPS ── */
+    .steps-section {
+      width: 100%;
+      max-width: 680px;
+      padding: 0 1.5rem;
+    }
+    .steps-title {
+      font-size: 0.58rem;
+      letter-spacing: 3px;
+      color: var(--text-dim);
+      margin-bottom: 0.75rem;
+    }
+    .how-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .how-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 0.9rem 0;
+      border-bottom: 1px solid rgba(0,255,136,0.07);
+    }
+    .how-step:last-child { border-bottom: none; }
+    .how-step-num {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.9rem;
+      font-weight: 900;
+      color: var(--green);
+      opacity: 0.4;
+      flex-shrink: 0;
+      width: 28px;
+      text-align: center;
+    }
+    .how-step-body {}
+    .how-step-title {
+      font-size: 0.7rem;
+      color: var(--text);
+      letter-spacing: 1px;
+      margin-bottom: 0.2rem;
+    }
+    .how-step-desc {
+      font-size: 0.6rem;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+
+    /* ── PAIRING CARD ── */
+    .wrapper {
+      width: 100%;
+      max-width: 480px;
+      padding: 0 0.75rem;
+    }
     @media (max-width: 500px) {
-      .wrapper {
-        max-width: 100%;
-        padding: 0.5rem;
-      }
+      .wrapper { max-width: 100%; padding: 0 0.5rem; }
     }
 
     .card {
@@ -85,14 +416,11 @@
       border-radius: 4px;
       padding: 1.75rem 1.5rem;
       position: relative;
-      box-shadow: 0 0 40px rgba(0,255,136,0.04), inset 0 0 60px rgba(0,0,0,0.4);
+      box-shadow: 0 0 60px rgba(0,255,136,0.04), inset 0 0 60px rgba(0,0,0,0.4);
     }
-
     @media (max-width: 500px) {
       .card { padding: 1.5rem 1.1rem; }
     }
-
-    /* Corner decorations */
     .card::before, .card::after {
       content: '';
       position: absolute;
@@ -109,7 +437,6 @@
       align-items: center;
       margin-bottom: 2rem;
     }
-
     .nav-back {
       font-size: 0.7rem;
       color: var(--text-dim);
@@ -123,7 +450,6 @@
     }
     .nav-back:hover { color: var(--green); }
     .nav-back::before { content: '←'; }
-
     .nav-title {
       font-size: 0.65rem;
       color: var(--text-dim);
@@ -131,7 +457,6 @@
     }
     .nav-title span { color: var(--green); }
 
-    /* Icon */
     .icon-wrap {
       display: flex;
       justify-content: center;
@@ -163,15 +488,13 @@
       box-shadow: 0 0 6px var(--green);
       vertical-align: middle;
     }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
-
     .secure-text {
       font-size: 0.62rem;
       color: var(--green);
       letter-spacing: 3px;
     }
 
-    h1 {
+    h1.card-title {
       font-family: 'Orbitron', sans-serif;
       font-size: 1.6rem;
       font-weight: 700;
@@ -180,10 +503,7 @@
       margin-bottom: 0.5rem;
       letter-spacing: 1px;
     }
-
-    @media (max-width: 500px) {
-      h1 { font-size: 1.4rem; }
-    }
+    @media (max-width: 500px) { h1.card-title { font-size: 1.4rem; } }
 
     .subtitle {
       font-size: 0.78rem;
@@ -193,14 +513,13 @@
       line-height: 1.6;
     }
 
-    /* Step indicators */
-    .steps {
+    .step-indicators {
       display: flex;
       justify-content: center;
       gap: 0.5rem;
       margin-bottom: 1.75rem;
     }
-    .step {
+    .step-ind {
       width: 32px; height: 22px;
       border: 1px solid var(--green-border);
       border-radius: 3px;
@@ -211,19 +530,18 @@
       color: var(--text-dim);
       background: rgba(0,255,136,0.03);
     }
-    .step.active {
+    .step-ind.active {
       border-color: var(--green);
       color: var(--green);
       background: rgba(0,255,136,0.08);
       box-shadow: 0 0 8px rgba(0,255,136,0.1);
     }
-    .step.done {
+    .step-ind.done {
       border-color: var(--green);
       color: var(--green);
       background: rgba(0,255,136,0.12);
     }
 
-    /* Form */
     .field-label {
       font-size: 0.6rem;
       letter-spacing: 3px;
@@ -238,8 +556,7 @@
     }
     .input-prefix {
       position: absolute;
-      left: 10px;
-      top: 50%;
+      left: 10px; top: 50%;
       transform: translateY(-50%);
       color: var(--green);
       font-size: 0.85rem;
@@ -247,10 +564,7 @@
       align-items: center;
       gap: 4px;
     }
-    .input-prefix-sep {
-      color: var(--green-border);
-      margin: 0 4px;
-    }
+    .input-prefix-sep { color: var(--green-border); margin: 0 4px; }
 
     input[type="text"] {
       width: 100%;
@@ -302,9 +616,18 @@
       box-shadow: 0 0 20px rgba(0,255,136,0.15);
     }
     .btn-generate:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-generate .caret { color: var(--green); }
 
-    /* Security notice */
+    .status-ticker {
+      font-size: 0.6rem;
+      color: var(--text-dim);
+      text-align: center;
+      margin-bottom: 0.5rem;
+      min-height: 1em;
+      transition: color 0.3s;
+      letter-spacing: 1px;
+    }
+    .status-ticker.active { color: var(--green); }
+
     .notice {
       background: rgba(0,255,136,0.04);
       border: 1px solid rgba(0,255,136,0.15);
@@ -326,7 +649,6 @@
       line-height: 1.6;
     }
 
-    /* Pairing code display */
     .pairing-result {
       display: none;
       text-align: center;
@@ -340,7 +662,6 @@
       letter-spacing: 3px;
       margin-bottom: 0.75rem;
     }
-
     .pair-code-box {
       background: rgba(0,255,136,0.06);
       border: 1px solid var(--green);
@@ -352,7 +673,6 @@
       transition: background 0.2s;
     }
     .pair-code-box:hover { background: rgba(0,255,136,0.1); }
-
     .pair-code-value {
       font-family: 'Orbitron', sans-serif;
       font-size: 1.6rem;
@@ -361,13 +681,11 @@
       letter-spacing: 6px;
       text-shadow: 0 0 20px rgba(0,255,136,0.5);
     }
-
     .pair-code-hint {
       font-size: 0.6rem;
       color: var(--text-dim);
       margin-top: 0.4rem;
     }
-
     .copy-badge {
       position: absolute;
       top: 6px; right: 8px;
@@ -375,7 +693,6 @@
       color: var(--text-dim);
       letter-spacing: 1px;
     }
-
     .waiting-msg {
       font-size: 0.65rem;
       color: var(--text-dim);
@@ -393,10 +710,7 @@
     .waiting-dots span:nth-child(3) { animation-delay: 0.4s; }
     @keyframes dotPulse { 0%,80%,100%{opacity:0.2} 40%{opacity:1} }
 
-    /* Session string display */
-    .session-result {
-      display: none;
-    }
+    .session-result { display: none; }
     .session-result.show { display: block; }
 
     .session-label {
@@ -406,7 +720,6 @@
       margin-bottom: 0.5rem;
       text-align: center;
     }
-
     .session-box {
       background: rgba(0,255,136,0.04);
       border: 1px solid var(--green-border);
@@ -421,7 +734,6 @@
       overflow-y: auto;
       cursor: pointer;
       transition: background 0.2s;
-      position: relative;
     }
     .session-box:hover { background: rgba(0,255,136,0.08); }
 
@@ -456,7 +768,6 @@
     }
     .btn-new:hover { border-color: var(--green); color: var(--green); }
 
-    /* Spinner */
     .spinner {
       width: 14px; height: 14px;
       border: 2px solid rgba(0,255,136,0.2);
@@ -467,7 +778,6 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Error */
     .error-msg {
       background: rgba(255,60,60,0.06);
       border: 1px solid rgba(255,60,60,0.2);
@@ -481,7 +791,7 @@
     }
     .error-msg.show { display: block; }
 
-    /* Toast */
+    /* ── TOAST ── */
     .toast {
       position: fixed;
       bottom: 1.5rem;
@@ -497,175 +807,134 @@
       padding: 0.5rem 1.25rem;
       opacity: 0;
       transition: all 0.3s;
-      z-index: 100;
+      z-index: 200;
       pointer-events: none;
+      white-space: nowrap;
     }
     .toast.show {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
     }
 
-    /* HUD bar — fixed top */
-    .hud-bar {
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      z-index: 10;
+    /* ── LINKED DEVICE NOTIFICATION FEED ── */
+    .notif-section {
+      width: 100%;
+      max-width: 480px;
+      padding: 0 0.75rem;
+    }
+    .notif-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0.4rem 1rem;
-      background: rgba(8,13,10,0.85);
-      border-bottom: 1px solid rgba(0,255,136,0.1);
-      backdrop-filter: blur(6px);
-      gap: 0.75rem;
+      margin-bottom: 0.6rem;
     }
-
-    /* Battery widget */
-    .battery-hud {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 0.6rem;
+    .notif-title {
+      font-size: 0.58rem;
+      letter-spacing: 3px;
       color: var(--text-dim);
-      letter-spacing: 1px;
-      white-space: nowrap;
     }
-    .battery-shell {
-      width: 28px; height: 13px;
-      border: 1px solid var(--green-border);
-      border-radius: 2px;
-      position: relative;
+    .notif-live {
       display: flex;
       align-items: center;
-      padding: 2px;
-    }
-    .battery-shell::after {
-      content: '';
-      position: absolute;
-      right: -4px; top: 50%;
-      transform: translateY(-50%);
-      width: 3px; height: 6px;
-      background: var(--green-border);
-      border-radius: 0 1px 1px 0;
-    }
-    .battery-fill {
-      height: 100%;
-      background: var(--green);
-      border-radius: 1px;
-      transition: width 0.5s, background 0.5s;
-    }
-    .battery-fill.low { background: #ff4444; }
-    .battery-fill.med { background: #ffaa00; }
-    .battery-charging {
-      font-size: 0.65rem;
-      color: var(--green);
-    }
-    .battery-pct {
-      color: var(--green);
-      font-size: 0.6rem;
-    }
-    .battery-na {
-      font-size: 0.6rem;
-      color: var(--text-dim);
-      letter-spacing: 1px;
-    }
-
-    /* Music player */
-    .player-hud {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex: 1;
-      min-width: 0;
-    }
-    .player-btn {
-      width: 24px; height: 24px;
-      border: 1px solid var(--green-border);
-      border-radius: 50%;
-      background: rgba(0,255,136,0.06);
-      color: var(--green);
-      font-size: 0.65rem;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
-      flex-shrink: 0;
-      padding: 0;
-    }
-    .player-btn:hover {
-      background: rgba(0,255,136,0.15);
-      border-color: var(--green);
-      box-shadow: 0 0 8px rgba(0,255,136,0.2);
-    }
-    .player-btn.playing {
-      border-color: var(--green);
-      background: rgba(0,255,136,0.12);
-      box-shadow: 0 0 10px rgba(0,255,136,0.25);
-    }
-    .player-track {
+      gap: 5px;
       font-size: 0.55rem;
-      color: var(--text-dim);
+      color: var(--green);
       letter-spacing: 1px;
+    }
+    .notif-live-dot {
+      width: 5px; height: 5px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: blink 1s infinite;
+      box-shadow: 0 0 5px var(--green);
+    }
+    .notif-feed {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      max-height: 240px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0,255,136,0.2) transparent;
+    }
+    .notif-feed::-webkit-scrollbar { width: 3px; }
+    .notif-feed::-webkit-scrollbar-track { background: transparent; }
+    .notif-feed::-webkit-scrollbar-thumb { background: rgba(0,255,136,0.2); border-radius: 2px; }
+
+    .notif-item {
+      background: rgba(0,255,136,0.04);
+      border: 1px solid rgba(0,255,136,0.1);
+      border-left: 2px solid var(--green);
+      border-radius: 2px;
+      padding: 0.5rem 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      animation: slideInNotif 0.35s ease-out;
+    }
+    .notif-item.success { border-left-color: var(--green); }
+    .notif-item.info    { border-left-color: #00aaff; }
+    .notif-item.warn    { border-left-color: #ffaa00; }
+
+    @keyframes slideInNotif {
+      from { opacity: 0; transform: translateX(-10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+
+    .notif-icon { font-size: 0.9rem; flex-shrink: 0; }
+    .notif-body { flex: 1; min-width: 0; }
+    .notif-msg {
+      font-size: 0.62rem;
+      color: var(--text);
+      letter-spacing: 0.5px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      min-width: 0;
     }
-    .player-track .track-name {
-      color: var(--green);
+    .notif-time {
+      font-size: 0.55rem;
+      color: var(--text-dim);
+      margin-top: 0.15rem;
     }
-    .player-progress {
-      flex: 1;
-      min-width: 30px;
-      height: 3px;
-      background: rgba(0,255,136,0.1);
-      border-radius: 2px;
-      cursor: pointer;
-      position: relative;
-      overflow: hidden;
+    .notif-empty {
+      text-align: center;
+      font-size: 0.62rem;
+      color: var(--text-dim);
+      padding: 1.5rem 0;
+      letter-spacing: 1px;
     }
-    .player-progress-fill {
-      height: 100%;
-      background: var(--green);
-      border-radius: 2px;
-      width: 0%;
-      transition: width 0.3s linear;
-      pointer-events: none;
-    }
-    .equalizer {
-      display: flex;
-      align-items: flex-end;
-      gap: 2px;
-      height: 14px;
-    }
-    .eq-bar {
-      width: 3px;
-      background: var(--green);
-      border-radius: 1px;
-      opacity: 0.7;
-    }
-    .eq-bar:nth-child(1) { animation: eq1 0.5s ease-in-out infinite alternate; }
-    .eq-bar:nth-child(2) { animation: eq2 0.4s ease-in-out infinite alternate; }
-    .eq-bar:nth-child(3) { animation: eq3 0.6s ease-in-out infinite alternate; }
-    .eq-bar:nth-child(4) { animation: eq4 0.35s ease-in-out infinite alternate; }
-    @keyframes eq1 { from { height: 3px; } to { height: 12px; } }
-    @keyframes eq2 { from { height: 6px; } to { height: 10px; } }
-    @keyframes eq3 { from { height: 4px; } to { height: 14px; } }
-    @keyframes eq4 { from { height: 8px; } to { height: 5px; } }
-    .equalizer.paused .eq-bar { animation-play-state: paused; height: 4px !important; }
 
-    /* Push card down so hud doesn't overlap */
-    .wrapper { margin-top: 2.5rem; }
+    /* ── FOOTER ── */
+    .footer {
+      width: 100%;
+      max-width: 680px;
+      padding: 2rem 1.5rem 0;
+      text-align: center;
+    }
+    .footer-line {
+      height: 1px;
+      background: rgba(0,255,136,0.08);
+      margin-bottom: 1.25rem;
+    }
+    .footer-text {
+      font-size: 0.58rem;
+      color: var(--text-dim);
+      letter-spacing: 2px;
+      line-height: 1.7;
+    }
+    .footer-text span { color: var(--green); }
+
+    /* Spacing utility */
+    .spacer { height: 2rem; }
+    .spacer-sm { height: 1.25rem; }
   </style>
 </head>
 <body>
 
 <canvas id="matrix-canvas"></canvas>
-
 <audio id="nexus-audio" src="/nexus_drill.mp3" loop preload="auto"></audio>
 
-<!-- HUD bar: music player + battery -->
+<!-- HUD bar -->
 <div class="hud-bar">
   <div class="player-hud">
     <button class="player-btn" id="player-btn" title="Play / Pause">▶</button>
@@ -682,7 +951,7 @@
       <div class="player-progress-fill" id="player-progress-fill"></div>
     </div>
   </div>
-  <div class="battery-hud" id="battery-hud">
+  <div class="battery-hud">
     <div class="battery-shell">
       <div class="battery-fill" id="battery-fill" style="width:0%"></div>
     </div>
@@ -691,79 +960,223 @@
   </div>
 </div>
 
-<div class="wrapper">
-  <div class="card">
-    <div class="nav">
-      <a class="nav-back" id="btn-back" href="#">BACK</a>
-      <div class="nav-title">CMD.PAIR // <span>v2.0</span></div>
+<!-- Main scrollable page -->
+<div class="page">
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-badge">
+      <span class="hero-dot"></span>
+      NEXUS-MD SYSTEM ONLINE
     </div>
+    <h1>NEXUS<span>-MD</span><br>PAIRING SESSION</h1>
+    <p>Link your WhatsApp account to NEXUS-BOT in seconds. Generate a secure pairing code, enter it in WhatsApp, and receive your session string instantly.</p>
+    <a class="hero-cta" href="#pair-section">&gt;_ START PAIRING</a>
+  </section>
 
-    <div class="icon-wrap">
-      <div class="icon-box">🔗</div>
-    </div>
+  <!-- Divider -->
+  <div class="divider">
+    <div class="divider-line"></div>
+    <div class="divider-label">// FEATURES</div>
+    <div class="divider-line"></div>
+  </div>
 
-    <div class="secure-badge">
-      <span class="secure-dot"></span>
-      <span class="secure-text">SECURE PROTOCOL ACTIVE</span>
-    </div>
-
-    <h1>Pairing Code</h1>
-    <p class="subtitle">Enter your WhatsApp number to generate a secure 8-digit pairing code.</p>
-
-    <div class="steps">
-      <div class="step active" id="step1">1</div>
-      <div class="step" id="step2">2</div>
-      <div class="step" id="step3">✓</div>
-    </div>
-
-    <div id="form-section">
-      <div class="field-label">// <span>PHONE NUMBER</span></div>
-      <div class="input-wrap">
-        <span class="input-prefix">📞 <span class="input-prefix-sep">|</span></span>
-        <input type="text" id="phone-input" placeholder="2547XXXXXXXXX" maxlength="15" />
+  <!-- Scrollable feature pads -->
+  <section class="pads-section">
+    <div class="pads-label">// SCROLL TO EXPLORE</div>
+    <div class="pads-row">
+      <div class="pad">
+        <div class="pad-icon">🔒</div>
+        <div class="pad-title">END-TO-END ENCRYPTED</div>
+        <div class="pad-text">All pairing codes and sessions are fully encrypted via WhatsApp's Signal protocol.</div>
       </div>
-      <div class="hint">Include country code, no + sign (e.g. 254712345678)</div>
-
-      <div class="error-msg" id="error-msg"></div>
-
-      <button class="btn-generate" id="btn-generate">
-        <span class="caret">&gt;_</span>
-        GENERATE CODE
-      </button>
-    </div>
-
-    <div class="pairing-result" id="pairing-result">
-      <div class="pair-code-label">// PAIRING CODE — ENTER IN WHATSAPP</div>
-      <div class="pair-code-box" id="pair-code-box" title="Click to copy">
-        <span class="copy-badge">CLICK TO COPY</span>
-        <div class="pair-code-value" id="pair-code-value">--------</div>
-        <div class="pair-code-hint">Open WhatsApp → Linked Devices → Link with phone number</div>
+      <div class="pad">
+        <div class="pad-icon">⚡</div>
+        <div class="pad-title">INSTANT PAIRING</div>
+        <div class="pad-text">Get your 8-digit pairing code in seconds. No QR code scanning required.</div>
       </div>
-      <div class="waiting-msg" id="waiting-msg">
-        <span class="spinner"></span>
-        AWAITING DEVICE LINK
-        <span class="waiting-dots"><span>.</span><span>.</span><span>.</span></span>
+      <div class="pad">
+        <div class="pad-icon">🔄</div>
+        <div class="pad-title">AUTO RETRY</div>
+        <div class="pad-text">Automatically retries across multiple WhatsApp servers for maximum reliability.</div>
+      </div>
+      <div class="pad">
+        <div class="pad-icon">📋</div>
+        <div class="pad-title">SESSION STRING</div>
+        <div class="pad-text">Receive a portable NEXUS-MD session string to use across any deployment.</div>
+      </div>
+      <div class="pad">
+        <div class="pad-icon">🌐</div>
+        <div class="pad-title">MULTI-SERVER</div>
+        <div class="pad-text">Connects via 4 WhatsApp gateway servers ensuring the best possible connection.</div>
+      </div>
+      <div class="pad">
+        <div class="pad-icon">🛡️</div>
+        <div class="pad-title">ONE-TIME USE</div>
+        <div class="pad-text">Each pairing code expires after a single use and cannot be replayed.</div>
       </div>
     </div>
+  </section>
 
-    <div class="session-result" id="session-result">
-      <div class="session-label">// SESSION STRING — COPY AND SAVE</div>
-      <div class="session-box" id="session-box" title="Click to copy"></div>
-      <button class="btn-copy-session" id="btn-copy-session">[ COPY SESSION STRING ]</button>
-      <button class="btn-new" id="btn-new">→ GENERATE NEW SESSION</button>
+  <div class="spacer-sm"></div>
+
+  <!-- Divider -->
+  <div class="divider">
+    <div class="divider-line"></div>
+    <div class="divider-label">// HOW IT WORKS</div>
+    <div class="divider-line"></div>
+  </div>
+
+  <!-- How it works -->
+  <section class="steps-section">
+    <div class="how-steps">
+      <div class="how-step">
+        <div class="how-step-num">01</div>
+        <div class="how-step-body">
+          <div class="how-step-title">ENTER YOUR NUMBER</div>
+          <div class="how-step-desc">Input your WhatsApp number with country code, no + sign (e.g. 254712345678).</div>
+        </div>
+      </div>
+      <div class="how-step">
+        <div class="how-step-num">02</div>
+        <div class="how-step-body">
+          <div class="how-step-title">RECEIVE PAIRING CODE</div>
+          <div class="how-step-desc">An 8-digit code is generated. Open WhatsApp → Linked Devices → Link with phone number.</div>
+        </div>
+      </div>
+      <div class="how-step">
+        <div class="how-step-num">03</div>
+        <div class="how-step-body">
+          <div class="how-step-title">ENTER CODE IN WHATSAPP</div>
+          <div class="how-step-desc">Enter the pairing code in WhatsApp within 90 seconds to confirm the link.</div>
+        </div>
+      </div>
+      <div class="how-step">
+        <div class="how-step-num">04</div>
+        <div class="how-step-body">
+          <div class="how-step-title">COPY SESSION STRING</div>
+          <div class="how-step-desc">Your NEXUS-MD session string is generated. Copy it and store it securely for your bot.</div>
+        </div>
+      </div>
     </div>
+  </section>
 
-    <div class="notice">
-      <div class="notice-title">🔒 SECURITY.NOTICE</div>
-      <div class="notice-text">Pairing code is encrypted end-to-end. Expires after one use. Do not share with anyone.</div>
+  <div class="spacer"></div>
+
+  <!-- Divider -->
+  <div class="divider">
+    <div class="divider-line"></div>
+    <div class="divider-label">// PAIR YOUR DEVICE</div>
+    <div class="divider-line"></div>
+  </div>
+
+  <div class="spacer-sm"></div>
+
+  <!-- Pairing card -->
+  <div class="wrapper" id="pair-section">
+    <div class="card">
+      <div class="nav">
+        <a class="nav-back" id="btn-back" href="#">BACK</a>
+        <div class="nav-title">CMD.PAIR // <span>v2.0</span></div>
+      </div>
+
+      <div class="icon-wrap">
+        <div class="icon-box">🔗</div>
+      </div>
+
+      <div class="secure-badge">
+        <span class="secure-dot"></span>
+        <span class="secure-text">SECURE PROTOCOL ACTIVE</span>
+      </div>
+
+      <h1 class="card-title">Pairing Code</h1>
+      <p class="subtitle">Enter your WhatsApp number to generate a secure 8-digit pairing code.</p>
+
+      <div class="step-indicators">
+        <div class="step-ind active" id="step1">1</div>
+        <div class="step-ind" id="step2">2</div>
+        <div class="step-ind" id="step3">✓</div>
+      </div>
+
+      <div id="form-section">
+        <div class="field-label">// <span>PHONE NUMBER</span></div>
+        <div class="input-wrap">
+          <span class="input-prefix">📞 <span class="input-prefix-sep">|</span></span>
+          <input type="text" id="phone-input" placeholder="2547XXXXXXXXX" maxlength="15" inputmode="numeric" />
+        </div>
+        <div class="hint">Include country code, no + sign (e.g. 254712345678)</div>
+
+        <div class="error-msg" id="error-msg"></div>
+        <div class="status-ticker" id="status-ticker"></div>
+
+        <button class="btn-generate" id="btn-generate">
+          <span class="caret">&gt;_</span>
+          GENERATE CODE
+        </button>
+      </div>
+
+      <div class="pairing-result" id="pairing-result">
+        <div class="pair-code-label">// PAIRING CODE — ENTER IN WHATSAPP</div>
+        <div class="pair-code-box" id="pair-code-box" title="Click to copy">
+          <span class="copy-badge">CLICK TO COPY</span>
+          <div class="pair-code-value" id="pair-code-value">--------</div>
+          <div class="pair-code-hint">WhatsApp → Linked Devices → Link with phone number</div>
+        </div>
+        <div class="waiting-msg" id="waiting-msg">
+          <span class="spinner"></span>
+          AWAITING DEVICE LINK
+          <span class="waiting-dots"><span>.</span><span>.</span><span>.</span></span>
+        </div>
+      </div>
+
+      <div class="session-result" id="session-result">
+        <div class="session-label">// SESSION STRING — COPY AND SAVE SECURELY</div>
+        <div class="session-box" id="session-box" title="Click to copy"></div>
+        <button class="btn-copy-session" id="btn-copy-session">[ COPY SESSION STRING ]</button>
+        <button class="btn-new" id="btn-new">→ GENERATE NEW SESSION</button>
+      </div>
+
+      <div class="notice">
+        <div class="notice-title">🔒 SECURITY.NOTICE</div>
+        <div class="notice-text">Pairing code is encrypted end-to-end. Expires after one use. Never share your session string with anyone.</div>
+      </div>
     </div>
   </div>
-</div>
+
+  <div class="spacer"></div>
+
+  <!-- Linked device notification feed -->
+  <div class="notif-section" id="notif-section" style="display:none">
+    <div class="notif-header">
+      <div class="notif-title">// DEVICE ACTIVITY LOG</div>
+      <div class="notif-live">
+        <div class="notif-live-dot"></div>
+        LIVE
+      </div>
+    </div>
+    <div class="notif-feed" id="notif-feed">
+      <div class="notif-empty" id="notif-empty">No activity yet.</div>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-line"></div>
+    <div class="footer-text">
+      <span>NEXUS-MD</span> PAIRING SESSION v2.0<br>
+      Built for NEXUS-BOT. Use responsibly.<br>
+      <span>© 2024 NEXUS-MD SYSTEM</span>
+    </div>
+  </footer>
+
+</div><!-- end .page -->
 
 <div class="toast" id="toast"></div>
 
 <script>
-  // Matrix rain
+  // ── Matrix rain ──────────────────────────────────────────────
   const canvas = document.getElementById('matrix-canvas');
   const ctx = canvas.getContext('2d');
   let cols, drops;
@@ -795,46 +1208,58 @@
   window.addEventListener('resize', initMatrix);
   setInterval(drawMatrix, 40);
 
-  // App state
-  const phoneInput = document.getElementById('phone-input');
-  const btnGenerate = document.getElementById('btn-generate');
-  const errorMsg = document.getElementById('error-msg');
-  const formSection = document.getElementById('form-section');
-  const pairingResult = document.getElementById('pairing-result');
-  const pairCodeValue = document.getElementById('pair-code-value');
-  const pairCodeBox = document.getElementById('pair-code-box');
-  const waitingMsg = document.getElementById('waiting-msg');
-  const sessionResult = document.getElementById('session-result');
-  const sessionBox = document.getElementById('session-box');
-  const btnCopySession = document.getElementById('btn-copy-session');
-  const btnNew = document.getElementById('btn-new');
-  const btnBack = document.getElementById('btn-back');
+  // ── App refs ─────────────────────────────────────────────────
+  const phoneInput   = document.getElementById('phone-input');
+  const btnGenerate  = document.getElementById('btn-generate');
+  const errorMsg     = document.getElementById('error-msg');
+  const statusTicker = document.getElementById('status-ticker');
+  const formSection  = document.getElementById('form-section');
+  const pairingResult   = document.getElementById('pairing-result');
+  const pairCodeValue   = document.getElementById('pair-code-value');
+  const pairCodeBox     = document.getElementById('pair-code-box');
+  const waitingMsg      = document.getElementById('waiting-msg');
+  const sessionResult   = document.getElementById('session-result');
+  const sessionBox      = document.getElementById('session-box');
+  const btnCopySession  = document.getElementById('btn-copy-session');
+  const btnNew          = document.getElementById('btn-new');
+  const btnBack         = document.getElementById('btn-back');
   const step1 = document.getElementById('step1');
   const step2 = document.getElementById('step2');
   const step3 = document.getElementById('step3');
+  const notifSection = document.getElementById('notif-section');
+  const notifFeed    = document.getElementById('notif-feed');
+  const notifEmpty   = document.getElementById('notif-empty');
 
+  // ── Toast ────────────────────────────────────────────────────
   function showToast(msg) {
     const toast = document.getElementById('toast');
     toast.textContent = msg;
     toast.classList.add('show');
-    setTimeout(() => toast.classList.remove('show'), 2000);
+    setTimeout(() => toast.classList.remove('show'), 2500);
   }
 
+  // ── Errors / Status ──────────────────────────────────────────
   function showError(msg) {
     errorMsg.textContent = '⚠ ' + msg;
     errorMsg.classList.add('show');
+    setStatus('');
   }
-
   function hideError() {
     errorMsg.classList.remove('show');
   }
-
-  function setStep(n) {
-    step1.className = 'step' + (n >= 1 ? (n > 1 ? ' done' : ' active') : '');
-    step2.className = 'step' + (n >= 2 ? (n > 2 ? ' done' : ' active') : '');
-    step3.className = 'step' + (n >= 3 ? ' done active' : '');
+  function setStatus(msg) {
+    statusTicker.textContent = msg;
+    statusTicker.classList.toggle('active', !!msg);
   }
 
+  // ── Step indicators ──────────────────────────────────────────
+  function setStep(n) {
+    step1.className = 'step-ind' + (n >= 1 ? (n > 1 ? ' done' : ' active') : '');
+    step2.className = 'step-ind' + (n >= 2 ? (n > 2 ? ' done' : ' active') : '');
+    step3.className = 'step-ind' + (n >= 3 ? ' done active' : '');
+  }
+
+  // ── Copy helper ───────────────────────────────────────────────
   function copyText(text) {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text).then(() => showToast('COPIED TO CLIPBOARD'));
@@ -849,24 +1274,68 @@
     }
   }
 
-  pairCodeBox.addEventListener('click', () => {
-    copyText(pairCodeValue.textContent);
-  });
+  // ── Notification feed ────────────────────────────────────────
+  function pushNotif(icon, msg, type = 'success') {
+    notifSection.style.display = 'block';
+    if (notifEmpty) notifEmpty.style.display = 'none';
 
-  btnCopySession.addEventListener('click', () => {
-    copyText(sessionBox.textContent);
-  });
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+    const item = document.createElement('div');
+    item.className = `notif-item ${type}`;
+    item.innerHTML = `
+      <div class="notif-icon">${icon}</div>
+      <div class="notif-body">
+        <div class="notif-msg">${msg}</div>
+        <div class="notif-time">${timeStr}</div>
+      </div>
+    `;
+    notifFeed.insertBefore(item, notifFeed.firstChild);
+
+    while (notifFeed.querySelectorAll('.notif-item').length > 20) {
+      const last = notifFeed.querySelector('.notif-item:last-child');
+      if (last) notifFeed.removeChild(last);
+    }
+
+    notifFeed.scrollTop = 0;
+  }
+
+  function spamLinkedNotifs(phone) {
+    const maskedPhone = phone.slice(0, 4) + '****' + phone.slice(-3);
+    const notifs = [
+      ['✅', `Device linked successfully: +${maskedPhone}`, 'success'],
+      ['📱', `WhatsApp session established for ${maskedPhone}`, 'success'],
+      ['🔐', 'Session credentials encrypted and exported', 'success'],
+      ['🟢', 'Connection status: ACTIVE', 'success'],
+      ['📡', 'WebSocket channel secured', 'info'],
+      ['🔑', 'Signal keys exchanged successfully', 'info'],
+      ['⚡', 'Session ready for deployment', 'success'],
+      ['📋', 'Session string generated — copy and store safely', 'info'],
+    ];
+
+    notifs.forEach(([icon, msg, type], i) => {
+      setTimeout(() => pushNotif(icon, msg, type), i * 320);
+    });
+
+    setInterval(() => {
+      const uptime = Math.floor((Date.now() - window._linkTime) / 1000);
+      pushNotif('🟢', `Session active — uptime ${uptime}s`, 'success');
+    }, 15000);
+  }
+
+  // ── Pairing events ────────────────────────────────────────────
+  pairCodeBox.addEventListener('click', () => copyText(pairCodeValue.textContent));
+  btnCopySession.addEventListener('click', () => copyText(sessionBox.textContent));
+  sessionBox.addEventListener('click', () => copyText(sessionBox.textContent));
   btnNew.addEventListener('click', resetApp);
-  btnBack.addEventListener('click', (e) => {
-    e.preventDefault();
-    resetApp();
-  });
+  btnBack.addEventListener('click', (e) => { e.preventDefault(); resetApp(); });
 
   function resetApp() {
     stopPolling();
     phoneInput.value = '';
     hideError();
+    setStatus('');
     formSection.style.display = 'block';
     pairingResult.classList.remove('show');
     sessionResult.classList.remove('show');
@@ -878,34 +1347,43 @@
 
   let activeSSE = null;
 
-  function closeSSE() {
+  function stopPolling() {
     if (activeSSE) { activeSSE.close(); activeSSE = null; }
   }
 
   function resetForm(errMsg) {
-    closeSSE();
+    stopPolling();
     pairingResult.classList.remove('show');
     formSection.style.display = 'block';
     btnGenerate.disabled = false;
     btnGenerate.innerHTML = '<span class="caret">&gt;_</span> GENERATE CODE';
     setStep(1);
+    setStatus('');
     if (errMsg) showError(errMsg);
   }
 
   btnGenerate.addEventListener('click', () => {
     const phone = phoneInput.value.trim().replace(/\D/g, '');
-    if (!phone || phone.length < 7) {
+    if (!phone || phone.length < 7 || phone.length > 15) {
       showError('Enter a valid phone number with country code (e.g. 254712345678)');
       return;
     }
 
     hideError();
-    closeSSE();
+    setStatus('Initializing connection...');
+    stopPolling();
     btnGenerate.disabled = true;
     btnGenerate.innerHTML = '<span class="spinner"></span> CONNECTING...';
 
     const es = new EventSource(`/api/pair?phone=${encodeURIComponent(phone)}`);
     activeSSE = es;
+
+    es.addEventListener('status', (e) => {
+      try {
+        const { message } = JSON.parse(e.data);
+        setStatus(message);
+      } catch {}
+    });
 
     es.addEventListener('code', (e) => {
       try {
@@ -914,6 +1392,9 @@
         formSection.style.display = 'none';
         pairingResult.classList.add('show');
         setStep(2);
+        setStatus('');
+        pushNotif('📲', `Pairing code sent: ${pairingCode}`, 'info');
+        notifSection.style.display = 'block';
       } catch {
         resetForm('Failed to parse pairing code. Try again.');
       }
@@ -922,12 +1403,18 @@
     es.addEventListener('session', (e) => {
       try {
         const { sessionString } = JSON.parse(e.data);
-        closeSSE();
+        stopPolling();
         waitingMsg.style.display = 'none';
         sessionBox.textContent = sessionString;
         sessionResult.classList.add('show');
         setStep(3);
-        showToast('DEVICE LINKED SUCCESSFULLY');
+        setStatus('');
+        showToast('✅ DEVICE LINKED SUCCESSFULLY');
+        window._linkTime = Date.now();
+        spamLinkedNotifs(phone);
+        setTimeout(() => {
+          document.getElementById('notif-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 600);
       } catch {
         resetForm('Failed to parse session. Try again.');
       }
@@ -936,36 +1423,36 @@
     es.addEventListener('error', (e) => {
       let msg = 'Connection failed. Try again.';
       try { msg = JSON.parse(e.data).message || msg; } catch {}
+      pushNotif('❌', msg, 'warn');
       resetForm(msg);
     });
 
     es.onerror = () => {
       if (activeSSE === es) {
-        resetForm('Connection failed. Check your number and try again.');
+        resetForm('Connection lost. Check your number and try again.');
       }
     };
 
-    // Safety timeout: 55s (just under Vercel's 60s Lambda limit)
     setTimeout(() => {
-      if (activeSSE === es) resetForm('Timed out. Enter the code in WhatsApp within 55 seconds.');
-    }, 55000);
+      if (activeSSE === es) {
+        resetForm('Request timed out. Enter the pairing code in WhatsApp within 90 seconds next time.');
+      }
+    }, 100000);
   });
 
   phoneInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') btnGenerate.click();
   });
-
-  // Only allow digits
   phoneInput.addEventListener('input', () => {
     phoneInput.value = phoneInput.value.replace(/\D/g, '');
   });
 
-  // ── Music Player ──────────────────────────────────────────
-  const audio = document.getElementById('nexus-audio');
-  const playerBtn = document.getElementById('player-btn');
-  const equalizer = document.getElementById('equalizer');
+  // ── Music Player ─────────────────────────────────────────────
+  const audio       = document.getElementById('nexus-audio');
+  const playerBtn   = document.getElementById('player-btn');
+  const equalizer   = document.getElementById('equalizer');
   const progressBar = document.getElementById('player-progress');
-  const progressFill = document.getElementById('player-progress-fill');
+  const progressFill= document.getElementById('player-progress-fill');
 
   let isPlaying = false;
 
@@ -997,22 +1484,19 @@
 
   audio.addEventListener('timeupdate', () => {
     if (audio.duration) {
-      const pct = (audio.currentTime / audio.duration) * 100;
-      progressFill.style.width = pct + '%';
+      progressFill.style.width = (audio.currentTime / audio.duration * 100) + '%';
     }
   });
 
   progressBar.addEventListener('click', (e) => {
     const rect = progressBar.getBoundingClientRect();
     const ratio = (e.clientX - rect.left) / rect.width;
-    if (audio.duration) {
-      audio.currentTime = ratio * audio.duration;
-    }
+    if (audio.duration) audio.currentTime = ratio * audio.duration;
   });
 
-  // ── Battery API ───────────────────────────────────────────
-  const batteryFill    = document.getElementById('battery-fill');
-  const batteryPct     = document.getElementById('battery-pct');
+  // ── Battery API ───────────────────────────────────────────────
+  const batteryFill     = document.getElementById('battery-fill');
+  const batteryPct      = document.getElementById('battery-pct');
   const batteryCharging = document.getElementById('battery-charging');
 
   function updateBattery(bat) {
@@ -1030,9 +1514,7 @@
       updateBattery(bat);
       bat.addEventListener('levelchange', () => updateBattery(bat));
       bat.addEventListener('chargingchange', () => updateBattery(bat));
-    }).catch(() => {
-      batteryPct.textContent = 'N/A';
-    });
+    }).catch(() => { batteryPct.textContent = 'N/A'; });
   } else {
     batteryPct.textContent = 'N/A';
   }
